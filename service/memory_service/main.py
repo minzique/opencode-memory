@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException, Response
 from memory_service.config import settings
 from memory_service.embeddings import EmbeddingClient
 from memory_service.models import (
+    BootstrapRequest,
+    BootstrapResponse,
     EpisodeRecord,
     EpisodeRequest,
     MemoryRecord,
@@ -18,6 +20,7 @@ from memory_service.models import (
     RecallResult,
     RememberRequest,
     ServiceStatus,
+    WorkingState,
 )
 from memory_service.store import MemoryStore
 
@@ -41,7 +44,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="OpenCode Memory Service",
     description="Persistent semantic memory for AI agents",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -50,7 +53,7 @@ app = FastAPI(
 async def root() -> dict[str, Any]:
     return {
         "service": "opencode-memory",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "endpoints": [
             {"method": "POST", "path": "/remember", "description": "Store a memory"},
             {"method": "POST", "path": "/recall", "description": "Search memories"},
@@ -58,6 +61,10 @@ async def root() -> dict[str, Any]:
             {"method": "DELETE", "path": "/forget/{memory_id}", "description": "Delete a memory"},
             {"method": "POST", "path": "/episode", "description": "Save session episode"},
             {"method": "GET", "path": "/episodes", "description": "List episodes"},
+            {"method": "PUT", "path": "/state/{project_id}", "description": "Save working state"},
+            {"method": "GET", "path": "/state/{project_id}", "description": "Get working state"},
+            {"method": "DELETE", "path": "/state/{project_id}", "description": "Clear working state"},
+            {"method": "POST", "path": "/bootstrap", "description": "Get full session context"},
             {"method": "GET", "path": "/status", "description": "Service status"},
             {"method": "GET", "path": "/health", "description": "Health check"},
         ],
@@ -254,15 +261,104 @@ async def list_episodes(
     return results
 
 
+@app.put("/state/{project_id}")
+async def save_state(project_id: str, request: WorkingState) -> dict[str, str]:
+    store: MemoryStore = app.state.store
+    store.set_state(project_id, request.model_dump())
+    return {"status": "saved", "project_id": project_id}
+
+
+@app.get("/state/{project_id}")
+async def get_state(project_id: str) -> dict[str, Any]:
+    store: MemoryStore = app.state.store
+    state = store.get_state(project_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"No state for project {project_id}")
+    return state
+
+
+@app.delete("/state/{project_id}", status_code=204)
+async def delete_state(project_id: str) -> Response:
+    store: MemoryStore = app.state.store
+    deleted = store.delete_state(project_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No state for project {project_id}")
+    return Response(status_code=204)
+
+
+@app.post("/bootstrap")
+async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
+    store: MemoryStore = app.state.store
+
+    project_id = request.project_id
+    if not project_id and request.cwd:
+        project_id = request.cwd.rstrip("/").rsplit("/", 1)[-1]
+
+    response = BootstrapResponse(project_id=project_id)
+
+    if request.include_state and project_id:
+        state_data = store.get_state(project_id)
+        if state_data:
+            response.state = WorkingState(**state_data["data"])
+
+    if request.include_memories:
+        global_types = ["preference", "convention", "constraint", "architecture"]
+        global_mems = store.get_memories_by_type(
+            global_types, project_id=project_id, limit=request.memory_limit
+        )
+        for mem in global_mems:
+            response.memories.append(
+                MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
+            )
+
+        constraint_mems = [m for m in global_mems if m["type"] == "constraint"]
+        for mem in constraint_mems:
+            response.constraints.append(
+                MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
+            )
+
+        if project_id:
+            error_mems = store.get_memories_by_type(
+                ["error-solution"], project_id=project_id, limit=10
+            )
+            for mem in error_mems:
+                response.failed_approaches.append(
+                    MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
+                )
+
+    if request.include_episodes and project_id:
+        episodes = store.list_episodes(project_id=project_id, limit=request.episode_limit)
+        for ep in episodes:
+            ep_data = ep.get("data", {})
+            response.recent_episodes.append(
+                EpisodeRecord(
+                    id=ep["id"],
+                    session_id=ep["session_id"],
+                    project_id=ep["project_id"],
+                    summary=ep["summary"],
+                    todos=ep_data.get("todos", []),
+                    decisions=ep_data.get("decisions", []),
+                    constraints=ep_data.get("constraints", []),
+                    failed_approaches=ep_data.get("failed_approaches", []),
+                    explored_files=ep_data.get("explored_files", []),
+                    created_at=ep["created_at"],
+                    metadata=ep.get("metadata", {}),
+                )
+            )
+
+    return response
+
+
 @app.get("/status")
 async def status() -> ServiceStatus:
     store: MemoryStore = app.state.store
     stats = store.get_stats()
     return ServiceStatus(
         healthy=True,
-        version="0.1.0",
+        version="0.2.0",
         memory_count=stats["memory_count"],
         episode_count=stats["episode_count"],
+        state_count=stats["state_count"],
         db_size_bytes=stats["db_size_bytes"],
         embedding_provider="openai",
         uptime_seconds=time.time() - app.state.start_time,

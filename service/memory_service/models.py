@@ -134,12 +134,43 @@ class EpisodeRecord(BaseModel):
     metadata: dict[str, Any] = {}
 
 
+class WorkingState(BaseModel):
+    objective: str = Field("", description="Current high-level goal")
+    approach: str = Field("", description="Current approach being taken")
+    progress: str = Field("", description="What's done so far")
+    files_touched: list[str] = Field(default_factory=list, description="Files modified in current task")
+    tried_and_failed: list[str] = Field(default_factory=list, description="Approaches that didn't work")
+    next_steps: list[str] = Field(default_factory=list, description="What to do next")
+    blockers: list[str] = Field(default_factory=list, description="Current blockers")
+    open_questions: list[str] = Field(default_factory=list, description="Unresolved questions")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary extra data")
+
+
+class BootstrapRequest(BaseModel):
+    project_id: str | None = Field(None, description="Project to load context for")
+    cwd: str | None = Field(None, description="Current working directory (auto-detects project)")
+    include_state: bool = Field(True, description="Include working state")
+    include_memories: bool = Field(True, description="Include relevant memories")
+    include_episodes: bool = Field(True, description="Include recent episodes")
+    memory_limit: int = Field(15, description="Max memories to include")
+    episode_limit: int = Field(3, description="Max recent episodes to include")
+
+
+class BootstrapResponse(BaseModel):
+    project_id: str | None = None
+    state: WorkingState | None = None
+    memories: list[MemoryRecord] = Field(default_factory=list)
+    recent_episodes: list[EpisodeRecord] = Field(default_factory=list)
+    constraints: list[MemoryRecord] = Field(default_factory=list, description="Active constraints")
+    failed_approaches: list[MemoryRecord] = Field(default_factory=list, description="Things that didn't work")
+
+
 class ServiceStatus(BaseModel):
-    """Service health and statistics."""
     healthy: bool = True
     version: str = "0.1.0"
     memory_count: int = 0
     episode_count: int = 0
+    state_count: int = 0
     db_size_bytes: int = 0
     embedding_provider: str = "openai"
     uptime_seconds: float = 0.0
