@@ -404,6 +404,19 @@ class MemoryStore:
             results.append(mem)
         return results
 
+    def list_memories(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT * FROM memories ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        results = []
+        for row in rows:
+            mem = dict(row)
+            mem["tags"] = json.loads(mem["tags"])
+            mem["metadata"] = json.loads(mem["metadata"])
+            results.append(mem)
+        return results
+
     # ------------------------------------------------------------------
     # Working state
     # ------------------------------------------------------------------
@@ -422,6 +435,19 @@ class MemoryStore:
         if row is None:
             return None
         return {"data": json.loads(row[0]), "updated_at": row[1]}
+
+    def list_states(self) -> list[dict]:
+        rows = self.db.execute(
+            "SELECT project_id, data, updated_at FROM working_state ORDER BY updated_at DESC"
+        ).fetchall()
+        results = []
+        for row in rows:
+            results.append({
+                "project_id": row[0],
+                "data": json.loads(row[1]),
+                "updated_at": row[2]
+            })
+        return results
 
     def delete_state(self, project_id: str) -> bool:
         cursor = self.db.execute("DELETE FROM working_state WHERE project_id = ?", (project_id,))

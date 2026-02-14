@@ -26,6 +26,7 @@ from memory_service.models import (
     WorkingState,
 )
 from memory_service.store import MemoryStore
+from memory_service.dashboard import router as dashboard_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ app = FastAPI(
     version="0.3.0",
     lifespan=lifespan,
 )
+
+app.include_router(dashboard_router)
 
 
 @app.get("/")
@@ -216,6 +219,16 @@ async def recall(query: RecallQuery) -> RecallResponse:
         raise HTTPException(status_code=500, detail=f"Failed to recall: {exc}") from exc
 
 
+@app.get("/memories")
+async def list_memories(limit: int = 50, offset: int = 0) -> list[MemoryRecord]:
+    store: MemoryStore = app.state.store
+    memories = store.list_memories(limit=limit, offset=offset)
+    return [
+        MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
+        for mem in memories
+    ]
+
+
 @app.get("/recall/{memory_id}")
 async def get_memory(memory_id: str) -> MemoryRecord:
     store: MemoryStore = app.state.store
@@ -338,6 +351,12 @@ async def get_state(project_id: str) -> dict[str, Any]:
     if state is None:
         raise HTTPException(status_code=404, detail=f"No state for project {project_id}")
     return state
+
+
+@app.get("/states")
+async def list_states() -> list[dict[str, Any]]:
+    store: MemoryStore = app.state.store
+    return store.list_states()
 
 
 @app.delete("/state/{project_id:path}", status_code=204)
