@@ -324,14 +324,14 @@ async def list_episodes(
     return results
 
 
-@app.put("/state/{project_id}")
+@app.put("/state/{project_id:path}")
 async def save_state(project_id: str, request: WorkingState) -> dict[str, str]:
     store: MemoryStore = app.state.store
     store.set_state(project_id, request.model_dump())
     return {"status": "saved", "project_id": project_id}
 
 
-@app.get("/state/{project_id}")
+@app.get("/state/{project_id:path}")
 async def get_state(project_id: str) -> dict[str, Any]:
     store: MemoryStore = app.state.store
     state = store.get_state(project_id)
@@ -340,7 +340,7 @@ async def get_state(project_id: str) -> dict[str, Any]:
     return state
 
 
-@app.delete("/state/{project_id}", status_code=204)
+@app.delete("/state/{project_id:path}", status_code=204)
 async def delete_state(project_id: str) -> Response:
     store: MemoryStore = app.state.store
     deleted = store.delete_state(project_id)
