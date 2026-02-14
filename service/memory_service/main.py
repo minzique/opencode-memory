@@ -9,11 +9,14 @@ from fastapi import FastAPI, HTTPException, Response
 
 from memory_service.config import settings
 from memory_service.embeddings import EmbeddingClient
+from memory_service.extractor import extract_memories
 from memory_service.models import (
     BootstrapRequest,
     BootstrapResponse,
     EpisodeRecord,
     EpisodeRequest,
+    ExtractRequest,
+    ExtractResponse,
     MemoryRecord,
     RecallQuery,
     RecallResponse,
@@ -44,7 +47,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="OpenCode Memory Service",
     description="Persistent semantic memory for AI agents",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -53,9 +56,10 @@ app = FastAPI(
 async def root() -> dict[str, Any]:
     return {
         "service": "opencode-memory",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "endpoints": [
             {"method": "POST", "path": "/remember", "description": "Store a memory"},
+            {"method": "POST", "path": "/extract", "description": "Extract memories from text via LLM"},
             {"method": "POST", "path": "/recall", "description": "Search memories"},
             {"method": "GET", "path": "/recall/{memory_id}", "description": "Get specific memory"},
             {"method": "DELETE", "path": "/forget/{memory_id}", "description": "Delete a memory"},
@@ -84,10 +88,24 @@ async def remember(request: RememberRequest, response: Response) -> dict[str, st
     try:
         embedding = await embeddings.embed(request.content)
 
-        existing_id = store.check_duplicate(embedding, settings.dedupe_threshold)
-        if existing_id:
+        existing_id, similarity = store.check_near_duplicate(
+            embedding, settings.consolidation_threshold, settings.dedupe_threshold
+        )
+
+        if existing_id and similarity >= settings.dedupe_threshold:
             response.status_code = 200
             return {"status": "duplicate", "existing_id": existing_id}
+
+        if existing_id and similarity >= settings.consolidation_threshold:
+            store.consolidate_memory(
+                existing_id=existing_id,
+                new_content=request.content,
+                new_tags=request.tags,
+                new_confidence=request.confidence,
+                new_metadata=request.metadata,
+            )
+            response.status_code = 200
+            return {"status": "consolidated", "existing_id": existing_id}
 
         memory_id = MemoryStore.generate_memory_id()
         store.add_memory(
@@ -109,6 +127,51 @@ async def remember(request: RememberRequest, response: Response) -> dict[str, st
     except Exception as exc:
         logger.exception("Failed to store memory")
         raise HTTPException(status_code=500, detail=f"Failed to store memory: {exc}") from exc
+
+
+@app.post("/extract")
+async def extract(request: ExtractRequest) -> ExtractResponse:
+    store: MemoryStore = app.state.store
+    embeddings: EmbeddingClient = app.state.embeddings
+
+    try:
+        client = embeddings._ensure_client()
+        memories = await extract_memories(
+            client=client,
+            model=settings.extraction_model,
+            text=request.text,
+            context=request.context,
+        )
+
+        if not memories:
+            return ExtractResponse(extracted=0, memory_ids=[])
+
+        texts = [m.content for m in memories]
+        vectors = await embeddings.embed_batch(texts)
+
+        memory_ids: list[str] = []
+        for mem, embedding in zip(memories, vectors):
+            memory_id = MemoryStore.generate_memory_id()
+            store.add_memory(
+                memory_id=memory_id,
+                content=mem.content,
+                embedding=embedding,
+                type=mem.type.value,
+                scope="project",
+                project_id=None,
+                tags=mem.tags + (["extracted", f"source:{request.source}"] if request.source else ["extracted"]),
+                source=request.source,
+                confidence=mem.confidence,
+                metadata={},
+            )
+            memory_ids.append(memory_id)
+
+        return ExtractResponse(extracted=len(memory_ids), memory_ids=memory_ids)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception:
+        logger.exception("Extraction failed")
+        return ExtractResponse(extracted=0, memory_ids=[])
 
 
 @app.post("/recall")
@@ -355,7 +418,7 @@ async def status() -> ServiceStatus:
     stats = store.get_stats()
     return ServiceStatus(
         healthy=True,
-        version="0.2.0",
+        version="0.3.0",
         memory_count=stats["memory_count"],
         episode_count=stats["episode_count"],
         state_count=stats["state_count"],

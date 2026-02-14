@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
+    extraction_model: str = "gpt-4o-mini"
+    consolidation_threshold: float = 0.85
+
     dedupe_threshold: float = 0.92
     decay_factor: float = 0.95
     min_score: float = 0.1

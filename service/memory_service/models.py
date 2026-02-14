@@ -22,6 +22,9 @@ class MemoryType(str, Enum):
     error_solution = "error-solution"
     fact = "fact"
     episode = "episode"
+    failure = "failure"
+    pattern = "pattern"
+    working_context = "working_context"
 
 
 class MemoryScope(str, Enum):
@@ -174,3 +177,32 @@ class ServiceStatus(BaseModel):
     db_size_bytes: int = 0
     embedding_provider: str = "openai"
     uptime_seconds: float = 0.0
+
+
+# ------------------------------------------------------------------
+# Extraction models
+# ------------------------------------------------------------------
+
+
+class ExtractRequest(BaseModel):
+    """Submit raw text for LLM-powered structured memory extraction."""
+
+    text: str = Field(..., description="Raw text to extract memories from")
+    context: str | None = Field(None, description="Optional context (project, task, etc.)")
+    source: str | None = Field(None, description="Where this text came from")
+
+
+class ExtractedMemory(BaseModel):
+    """A single memory extracted by the LLM."""
+
+    content: str = Field(..., description="The extracted knowledge")
+    type: MemoryType = Field(..., description="Category of this memory")
+    confidence: float = Field(0.8, ge=0.0, le=1.0, description="Extraction confidence")
+    tags: list[str] = Field(default_factory=list, description="Relevant tags")
+
+
+class ExtractResponse(BaseModel):
+    """Response from /extract endpoint."""
+
+    extracted: int = Field(0, description="Number of memories extracted and stored")
+    memory_ids: list[str] = Field(default_factory=list, description="IDs of created memories")

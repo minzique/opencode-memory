@@ -321,6 +321,69 @@ class MemoryStore:
 
         return None
 
+    def check_near_duplicate(
+        self, embedding: list[float], consolidation_threshold: float, dedupe_threshold: float
+    ) -> tuple[str | None, float]:
+        """Return (memory_id, similarity) of the closest match, or (None, 0.0)."""
+        rows = self.db.execute(
+            "SELECT rowid, distance FROM vec_memories "
+            "WHERE embedding MATCH ? ORDER BY distance LIMIT 1",
+            [serialize_float32(embedding)],
+        ).fetchall()
+
+        if not rows:
+            return None, 0.0
+
+        vec_id, distance = rows[0]
+        similarity = 1.0 - (distance / 2.0)
+
+        if similarity >= consolidation_threshold:
+            row = self.db.execute(
+                "SELECT id FROM memories WHERE vec_id = ?", (vec_id,)
+            ).fetchone()
+            if row:
+                return row[0], similarity
+
+        return None, similarity
+
+    def consolidate_memory(
+        self,
+        existing_id: str,
+        new_content: str,
+        new_tags: list[str],
+        new_confidence: float,
+        new_metadata: dict,
+    ) -> None:
+        """Merge new memory data into an existing near-duplicate."""
+        mem = self.get_memory(existing_id)
+        if mem is None:
+            return
+
+        merged_content = f"{mem['content']}\n---\n{new_content}"
+        merged_confidence = max(mem.get("confidence", 1.0), new_confidence)
+
+        existing_tags: list[str] = mem.get("tags", [])
+        merged_tags = list(dict.fromkeys(existing_tags + new_tags))
+
+        existing_meta: dict = mem.get("metadata", {})
+        existing_meta.update(new_metadata)
+
+        now = time.time()
+        self.db.execute(
+            "UPDATE memories SET content = ?, confidence = ?, tags = ?, "
+            "metadata = ?, updated_at = ? WHERE id = ?",
+            (
+                merged_content,
+                merged_confidence,
+                json.dumps(merged_tags),
+                json.dumps(existing_meta),
+                now,
+                existing_id,
+            ),
+        )
+        self.db.commit()
+        logger.debug("Consolidated memory %s", existing_id)
+
     def get_memories_by_type(
         self, types: list[str], project_id: str | None = None, limit: int = 50
     ) -> list[dict]:
