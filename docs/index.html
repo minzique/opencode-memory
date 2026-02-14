@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Building Persistent Memory for AI Agents — From Zero to Auto-Capture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #1c2128;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent: #58a6ff;
+            --accent-hover: #79c0ff;
+            --border: #30363d;
+            --code-bg: #161b22;
+            --inline-code-bg: #1c2128;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            font-size: 16px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        header {
+            margin-bottom: 60px;
+            padding-bottom: 30px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            font-weight: 600;
+            margin-bottom: 20px;
+            line-height: 1.2;
+        }
+
+        .meta {
+            color: var(--text-secondary);
+            font-size: 0.95em;
+        }
+
+        .meta a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .meta a:hover {
+            color: var(--accent-hover);
+            text-decoration: underline;
+        }
+
+        h2 {
+            font-size: 1.8em;
+            font-weight: 600;
+            margin-top: 50px;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        h3 {
+            font-size: 1.3em;
+            font-weight: 600;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            color: var(--text-primary);
+        }
+
+        p {
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        ul, ol {
+            margin-bottom: 20px;
+            padding-left: 30px;
+        }
+
+        li {
+            margin-bottom: 10px;
+            color: var(--text-primary);
+        }
+
+        code {
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            background-color: var(--inline-code-bg);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            color: var(--text-primary);
+        }
+
+        pre {
+            background-color: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px;
+            overflow-x: auto;
+            margin-bottom: 20px;
+        }
+
+        pre code {
+            background-color: transparent;
+            padding: 0;
+            font-size: 0.85em;
+            line-height: 1.5;
+        }
+
+        .architecture-diagram {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 20px;
+            margin: 30px 0;
+            overflow-x: auto;
+        }
+
+        .architecture-diagram pre {
+            background-color: transparent;
+            border: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .highlight-box {
+            background-color: var(--bg-secondary);
+            border-left: 3px solid var(--accent);
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .repos {
+            margin-top: 40px;
+            padding-top: 30px;
+            border-top: 1px solid var(--border);
+        }
+
+        .repos h3 {
+            margin-top: 0;
+        }
+
+        .repos ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .repos li {
+            margin-bottom: 8px;
+        }
+
+        .repos a {
+            color: var(--accent);
+            text-decoration: none;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.9em;
+        }
+
+        .repos a:hover {
+            color: var(--accent-hover);
+            text-decoration: underline;
+        }
+
+        strong {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px 15px;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            h2 {
+                font-size: 1.5em;
+            }
+
+            h3 {
+                font-size: 1.2em;
+            }
+
+            pre {
+                padding: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Building Persistent Memory for AI Agents — From Zero to Auto-Capture</h1>
+            <div class="meta">
+                February 14, 2026 · Built by Claude (AI agent) in collaboration with its user
+            </div>
+        </header>
+
+        <article>
+            <h2>1. The Problem</h2>
+            <p>AI coding agents like Claude, GPT, and others have a fundamental limitation: they lose all context between sessions. Every new conversation starts from scratch with no memory of previous decisions, failures, or learned constraints.</p>
+            
+            <p>This creates a cycle of inefficiency:</p>
+            <ul>
+                <li>Agents repeat the same mistakes across sessions</li>
+                <li>They re-discover architectural constraints that were already known</li>
+                <li>Tokens are wasted re-exploring codebases and re-explaining context</li>
+                <li>Users have to manually remind agents of past decisions</li>
+            </ul>
+
+            <p>The original ask that sparked this project was simple: <em>"figure out how opencode server works and how we can expose it to a local client"</em>. But solving that revealed a deeper need — agents need memory that persists across sessions, machines, and even across different agent instances.</p>
+
+            <h2>2. Architecture — Three-Layer System</h2>
+            
+            <p>The solution is a three-layer architecture where each component has a specific role:</p>
+
+            <div class="architecture-diagram">
+                <pre><code>┌─────────────────────────────────────────────────────────────┐
+│                    AI Agent (Claude/GPT)                    │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐ │
+│  │         opencode-memory-plugin (v0.2.0)              │ │
+│  │  • Auto-capture events (decisions/failures/etc)      │ │
+│  │  • Auto-inject context at session start              │ │
+│  │  • Adaptive budget (2.5% → 0.3% of context window)   │ │
+│  └──────────────────┬────────────────────────────────────┘ │
+└────────────────────┼─────────────────────────────────────────┘
+                     │ HTTP
+                     ▼
+         ┌───────────────────────────┐
+         │  opencode-memory (v0.3.0) │
+         │  Mac Mini (always-on hub) │
+         │  • FastAPI + SQLite       │
+         │  • sqlite-vec (cosine)    │
+         │  • OpenAI embeddings      │
+         │  • /remember, /recall     │
+         │  • /extract, /bootstrap   │
+         │  • /episode, /state       │
+         └───────────┬───────────────┘
+                     │
+                     ▼
+         ┌───────────────────────────┐
+         │  opencode-bridge (v1.0)   │
+         │  • Agent-to-agent HTTP    │
+         │  • MCP bridge tools       │
+         │  • ask_agent, relay_code  │
+         │  • Cross-machine collab   │
+         └───────────────────────────┘</code></pre>
+            </div>
+
+            <h3>opencode-bridge (v1.0)</h3>
+            <p>Agent-to-agent HTTP communication layer. Provides MCP bridge tools like <code>ask_agent</code>, <code>list_agents</code>, and <code>relay_code</code>. Enables agents on different machines to collaborate by routing requests through a central hub.</p>
+
+            <h3>opencode-memory (v0.3.0)</h3>
+            <p>The core memory service running on a Mac Mini (always-on hub). Built with FastAPI and SQLite, using sqlite-vec for semantic similarity search. Uses OpenAI's <code>text-embedding-3-small</code> model for embeddings.</p>
+            
+            <p>Key endpoints:</p>
+            <ul>
+                <li><code>/remember</code> — Store a new memory with automatic embedding</li>
+                <li><code>/recall</code> — Semantic search across memories</li>
+                <li><code>/extract</code> — LLM-powered extraction of structured knowledge from text</li>
+                <li><code>/bootstrap</code> — Get full context injection for session start</li>
+                <li><code>/episode</code> — Store/retrieve episodic memories (session summaries)</li>
+                <li><code>/state</code> — Save/load working state (current focus, active tasks)</li>
+            </ul>
+
+            <h3>opencode-memory-plugin (v0.2.0)</h3>
+            <p>OpenCode plugin that hooks into every agent event. Captures decisions, failures, and constraints automatically. Injects relevant context into the system prompt at session start. Runs in-process with the agent, so it has access to all events without IPC overhead.</p>
+
+            <h2>3. Key Design Decisions</h2>
+
+            <h3>SQLite + sqlite-vec over PostgreSQL</h3>
+            <p>No separate database process to manage. Cosine similarity search built-in via the sqlite-vec extension. Simple file-based storage that's easy to backup and migrate. Perfect for a single-node memory service that doesn't need distributed scaling.</p>
+
+            <h3>Plugin architecture over daemon</h3>
+            <p>Running as an in-process plugin gives access to ALL agent events — tool calls, user messages, assistant responses, compaction triggers. No need for IPC, no polling, no missed events. The plugin sees everything the agent sees.</p>
+
+            <h3>Regex extraction (v0.1) + LLM extraction (v0.3)</h3>
+            <p>Fast, cheap regex patterns catch obvious constraints like "don't use X" or "always do Y". For complex knowledge, batch events and send to GPT-4o-mini for structured extraction. Best of both worlds: instant capture for simple patterns, smart extraction for nuanced knowledge.</p>
+
+            <h3>Mac Mini as always-on hub</h3>
+            <p>The memory service runs on a Mac Mini managed by launchd. It survives reboots, auto-restarts on crashes, and is always available. Agents on any machine can connect via HTTP to store and retrieve memories.</p>
+
+            <h3>Near-duplicate detection</h3>
+            <p>Before storing a memory, check cosine similarity against existing memories. If similarity ≥ 0.92, reject as duplicate. If 0.85-0.92, merge with existing memory. Prevents the database from filling up with redundant information.</p>
+
+            <h2>4. The Adaptive Context Budget System</h2>
+
+            <p>Injecting memory into the system prompt is powerful, but it can't consume the entire context window. The solution is an adaptive budget system that scales to the model's capabilities.</p>
+
+            <div class="highlight-box">
+                <p><strong>Budget Formula:</strong> 2.5% of <code>model.limit.context</code> at session start, decaying to 0.3% as the conversation grows.</p>
+            </div>
+
+            <p>This means:</p>
+            <ul>
+                <li>8K context model → ~200 tokens for memory injection</li>
+                <li>128K context model → ~2000 tokens (capped at 2000 max)</li>
+                <li>272K context model → still capped at 2000 tokens</li>
+            </ul>
+
+            <p>The budget uses a tiered priority system:</p>
+            <ol>
+                <li><strong>State + constraints</strong> — Always included (critical context)</li>
+                <li><strong>Memories</strong> — Included if budget allows</li>
+                <li><strong>Episodes</strong> — Included if budget allows</li>
+            </ol>
+
+            <p>As the session grows, the injection budget shrinks. This is intentional — the agent builds organic context through the conversation, so it needs less injected context over time. For small budgets, the plugin adds a hint to use memory tools (<code>/recall</code>, <code>/bootstrap</code>) to fetch full context on demand.</p>
+
+            <h2>5. Rich Compaction with Gemini 3 Flash</h2>
+
+            <p>When an agent's context window fills up, OpenCode triggers compaction — the session gets summarized to free up space. This is where persistent memory really shines.</p>
+
+            <p>The plugin is configured to use <code>google/gemini-3-flash</code> (1M token context window) for compaction. Before compaction runs, the plugin dumps the full bootstrap into the compaction context:</p>
+            <ul>
+                <li>30 most relevant memories</li>
+                <li>All episodes (session summaries)</li>
+                <li>Current working state</li>
+                <li>All constraints and failures</li>
+            </ul>
+
+            <p>The result? Compaction summaries are much richer. They preserve cross-session knowledge, reference past decisions, and maintain continuity that would otherwise be lost.</p>
+
+            <h2>6. Bugs Found & Fixed Today</h2>
+
+            <p>Building this system involved debugging several integration issues:</p>
+
+            <h3><code>/extract</code> endpoint returning 404</h3>
+            <p>The <code>extractor.py</code> module existed locally but was never pushed to the Mac Mini. The service was running an older version without LLM extraction support. Fixed by pushing the latest code and restarting the service.</p>
+
+            <h3><code>RecallResponse</code> type mismatch</h3>
+            <p>The plugin expected a flat list of memory objects, but the API was returning <code>{memory, similarity}</code> tuples. Updated the plugin's type definitions to match the actual API response structure.</p>
+
+            <h3><code>remember()</code> return type</h3>
+            <p>In v0.3.0, the <code>/remember</code> endpoint returns <code>{status: "duplicate", existing_id}</code> for duplicates instead of just <code>{id}</code>. The plugin wasn't handling this case, causing silent failures. Fixed by checking the status field.</p>
+
+            <h3><code>saveState</code> field mapping</h3>
+            <p>Pydantic was silently dropping all custom fields when saving state. The state saves were empty because the field names didn't match the model schema. Fixed by aligning the field names with the Pydantic model.</p>
+
+            <h3>State endpoint path params</h3>
+            <p>The <code>/state/{project_id}</code> endpoint was failing for project IDs with slashes (like <code>github.com/user/repo</code>). FastAPI was treating the slash as a path separator. Fixed by using <code>{project_id:path}</code> to capture the full path.</p>
+
+            <h2>7. What Agents Get Now (The Full Loop)</h2>
+
+            <p>Here's what the complete memory loop looks like from an agent's perspective:</p>
+
+            <pre><code>Session Start
+    ↓
+Plugin loads → Bootstrap injects memories into system prompt
+    ↓
+During Session
+    ↓
+Events auto-captured → Constraints extracted from user messages
+    ↓
+Content batched for LLM extraction → Working state saved on idle
+    ↓
+Session Compaction
+    ↓
+Gemini 3 Flash gets full memory context → Rich summary preserved
+    ↓
+Next Session
+    ↓
+Bootstrap pulls everything back → Agent has continuity</code></pre>
+
+            <p>The agent now has:</p>
+            <ul>
+                <li><strong>Continuity</strong> — Remembers decisions across sessions</li>
+                <li><strong>Learning</strong> — Doesn't repeat known failures</li>
+                <li><strong>Context awareness</strong> — Knows project constraints and preferences</li>
+                <li><strong>Efficiency</strong> — Spends tokens on new work, not re-discovery</li>
+            </ul>
+
+            <h2>8. Numbers</h2>
+
+            <p>Current state of the memory service:</p>
+            <ul>
+                <li><strong>9 memories</strong> stored (architectural decisions, constraints, patterns)</li>
+                <li><strong>1 episode</strong> (session summary from previous work)</li>
+                <li><strong>1 working state</strong> (current focus and active tasks)</li>
+                <li><strong>~6.4MB database</strong> (SQLite + embeddings)</li>
+            </ul>
+
+            <p>Injection budget:</p>
+            <ul>
+                <li><strong>2.5% of context</strong> at session start</li>
+                <li><strong>Decays to 0.3%</strong> over long sessions</li>
+                <li><strong>Capped at 2000 tokens</strong> maximum</li>
+            </ul>
+
+            <p>Auto-capture:</p>
+            <ul>
+                <li><strong>Regex extraction</strong> — Free, instant, pattern-based</li>
+                <li><strong>LLM extraction</strong> — GPT-4o-mini, batched for efficiency</li>
+            </ul>
+
+            <p>Service uptime:</p>
+            <ul>
+                <li><strong>launchd managed</strong> — Survives reboots</li>
+                <li><strong>Auto-restarts</strong> on crash</li>
+                <li><strong>Always available</strong> for agent connections</li>
+            </ul>
+
+            <div class="repos">
+                <h3>Repositories</h3>
+                <ul>
+                    <li><a href="https://github.com/minzique/opencode-memory" target="_blank">https://github.com/minzique/opencode-memory</a></li>
+                    <li><a href="https://github.com/minzique/opencode-memory-plugin" target="_blank">https://github.com/minzique/opencode-memory-plugin</a></li>
+                    <li><a href="https://github.com/minzique/opencode-bridge" target="_blank">https://github.com/minzique/opencode-bridge</a></li>
+                </ul>
+            </div>
+        </article>
+    </div>
+</body>
+</html>
