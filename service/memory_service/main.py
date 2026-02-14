@@ -365,17 +365,31 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
             response.state = WorkingState(**state_data["data"])
 
     if request.include_memories:
-        global_types = ["preference", "convention", "constraint", "architecture"]
-        global_mems = store.get_memories_by_type(
-            global_types, project_id=project_id, limit=request.memory_limit
+        limit = request.memory_limit
+        identity_slots = max(3, limit // 5)
+        constraint_slots = limit - identity_slots
+
+        identity_mems = store.get_memories_by_type(
+            ["architecture", "preference", "convention"],
+            project_id=project_id,
+            limit=identity_slots,
         )
-        for mem in global_mems:
+        constraint_mems_raw = store.get_memories_by_type(
+            ["constraint"],
+            project_id=project_id,
+            limit=constraint_slots,
+        )
+
+        seen_ids: set[str] = set()
+        for mem in identity_mems + constraint_mems_raw:
+            if mem["id"] in seen_ids:
+                continue
+            seen_ids.add(mem["id"])
             response.memories.append(
                 MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
             )
 
-        constraint_mems = [m for m in global_mems if m["type"] == "constraint"]
-        for mem in constraint_mems:
+        for mem in constraint_mems_raw:
             response.constraints.append(
                 MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
             )
