@@ -15,13 +15,23 @@ _SYSTEM_PROMPT = (
     "You extract structured memories from text. "
     "Return a JSON array of objects with these fields:\n"
     '- "content": concise statement of the knowledge\n'
-    '- "type": one of: decision, constraint, fact, error-solution, preference, convention\n'
+    '- "type": one of the following (pick the MOST specific match):\n'
+    "    - decision: explicit choice made (e.g. 'chose FastAPI over Flask')\n"
+    "    - constraint: rule or boundary that must be followed (e.g. 'never commit .env files')\n"
+    "    - architecture: system design, infrastructure, or structural pattern (e.g. 'memory service runs on Mac Mini')\n"
+    "    - pattern: recurring technique or best practice (e.g. 'use worktree-first workflow')\n"
+    "    - convention: naming, style, or process agreement (e.g. 'use ES modules syntax')\n"
+    "    - preference: personal or team preference (e.g. 'prefer dark minimal UI')\n"
+    "    - error-solution: a problem and its fix (e.g. 'empty JSON body → use response.text() first')\n"
+    "    - failure: something that broke or didn't work (e.g. 'pyenv Python breaks sqlite-vec')\n"
+    "    - fact: general knowledge that doesn't fit other categories\n"
     '- "confidence": 0.0-1.0 how certain this is\n'
     '- "tags": list of short keyword tags\n\n'
     "Rules:\n"
     "- Only extract clear, actionable knowledge\n"
     "- Skip vague or trivial statements\n"
     "- Each memory should stand alone without context\n"
+    "- Prefer specific types over 'fact' — only use 'fact' as a last resort\n"
     "- Return [] if nothing worth extracting\n"
     "- Return ONLY the JSON array, no markdown fences"
 )

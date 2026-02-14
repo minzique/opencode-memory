@@ -185,16 +185,26 @@ async def extract(request: ExtractRequest) -> ExtractResponse:
         texts = [m.content for m in memories]
         vectors = await embeddings.embed_batch(texts)
 
+        # Types that are inherently global (not project-specific)
+        _GLOBAL_TYPES = {"preference", "convention"}
+
         memory_ids: list[str] = []
         for mem, embedding in zip(memories, vectors):
             memory_id = MemoryStore.generate_memory_id()
+            # Infer scope: explicit override > type-based inference > project default
+            if request.scope:
+                mem_scope = request.scope
+            elif mem.type.value in _GLOBAL_TYPES:
+                mem_scope = "global"
+            else:
+                mem_scope = "project"
             store.add_memory(
                 memory_id=memory_id,
                 content=mem.content,
                 embedding=embedding,
                 type=mem.type.value,
-                scope="project",
-                project_id=None,
+                scope=mem_scope,
+                project_id=request.project_id,
                 tags=mem.tags + (["extracted", f"source:{request.source}"] if request.source else ["extracted"]),
                 source=request.source,
                 confidence=mem.confidence,
@@ -456,7 +466,7 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
 
         if project_id:
             error_mems = store.get_memories_by_type(
-                ["error-solution"], project_id=project_id, limit=10
+                ["error-solution", "failure"], project_id=project_id, limit=10
             )
             for mem in error_mems:
                 response.failed_approaches.append(

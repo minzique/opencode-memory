@@ -40,7 +40,7 @@ class RememberRequest(BaseModel):
     project_id: str | None = Field(None, description="Project identifier (for project-scoped)")
     tags: list[str] = Field(default_factory=list, description="Tags for filtering")
     source: str | None = Field(None, description="Where this memory came from (session ID, agent, etc.)")
-    confidence: float = Field(1.0, ge=0.0, le=1.0, description="How confident we are (1.0 = certain)")
+    confidence: float = Field(0.8, ge=0.0, le=1.0, description="How confident we are (1.0 = certain)")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary extra data")
 
 
@@ -197,6 +197,8 @@ class ExtractRequest(BaseModel):
     text: str = Field(..., description="Raw text to extract memories from")
     context: str | None = Field(None, description="Optional context (project, task, etc.)")
     source: str | None = Field(None, description="Where this text came from")
+    project_id: str | None = Field(None, description="Project identifier for scoping extracted memories")
+    scope: str | None = Field(None, description="Scope override (global/project/session)")
 
 
 class ExtractedMemory(BaseModel):

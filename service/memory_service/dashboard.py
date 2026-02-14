@@ -24,7 +24,7 @@ async def dashboard():
             --font-mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
         }
 
-        * { box-sizing: border_box; margin: 0; padding: 0; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             background-color: var(--bg);
@@ -40,8 +40,8 @@ async def dashboard():
 
         header {
             display: flex;
-            justify_content: space-between;
-            align_items: center;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 2rem;
             padding-bottom: 1rem;
             border-bottom: 1px solid var(--border);
@@ -54,7 +54,7 @@ async def dashboard():
 
         .grid {
             display: grid;
-            grid-template_columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 2rem;
             margin-bottom: 2rem;
         }
@@ -144,6 +144,12 @@ async def dashboard():
         .type-decision { background: rgba(16, 185, 129, 0.1); color: #34d399; }
         .type-fact { background: rgba(107, 114, 128, 0.1); color: #9ca3af; }
         .type-preference { background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+        .type-convention { background: rgba(168, 85, 247, 0.1); color: #a78bfa; }
+        .type-error-solution { background: rgba(251, 146, 60, 0.1); color: #fb923c; }
+        .type-episode { background: rgba(56, 189, 248, 0.1); color: #38bdf8; }
+        .type-failure { background: rgba(244, 63, 94, 0.1); color: #fb7185; }
+        .type-pattern { background: rgba(45, 212, 191, 0.1); color: #2dd4bf; }
+        .type-working_context { background: rgba(148, 163, 184, 0.1); color: #94a3b8; }
         
         .content-cell {
             max-width: 400px;
@@ -166,7 +172,7 @@ async def dashboard():
         
         .item-header {
             display: flex;
-            justify_content: space-between;
+            justify-content: space-between;
             margin-bottom: 0.5rem;
         }
         
@@ -214,7 +220,7 @@ async def dashboard():
 
         .pagination {
             display: flex;
-            justify_content: center;
+            justify-content: center;
             gap: 1rem;
             margin-top: 1rem;
         }
@@ -238,7 +244,7 @@ async def dashboard():
     <header>
         <div>
             <h1>lume / memory</h1>
-            <div class="subtitle" id="version-info">v0.3.0 • <span id="uptime">0s uptime</span></div>
+            <div class="subtitle" id="version-info">v0.4.0 • <span id="uptime">0s uptime</span></div>
         </div>
         <div style="text-align: right">
             <div class="subtitle" id="connection-status">Connected</div>
@@ -279,7 +285,7 @@ async def dashboard():
     </div>
 
     <div class="panel">
-        <div style="display: flex; justify_content: space-between; align_items: center; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
             <h2>Memories</h2>
             <div class="filters" id="type-filters">
                 <button class="filter-btn active" data-type="all">All</button>
@@ -291,6 +297,8 @@ async def dashboard():
                 <button class="filter-btn" data-type="convention">Convention</button>
                 <button class="filter-btn" data-type="pattern">Pattern</button>
                 <button class="filter-btn" data-type="failure">Failure</button>
+                <button class="filter-btn" data-type="error-solution">Error Fix</button>
+                <button class="filter-btn" data-type="episode">Episode</button>
             </div>
         </div>
         
@@ -313,7 +321,7 @@ async def dashboard():
         </div>
         <div class="pagination">
             <button class="btn" id="prev-page" onclick="changePage(-1)">Previous</button>
-            <span id="page-info" style="align_self: center;">Page 1</span>
+            <span id="page-info" style="align-self: center;">Page 1</span>
             <button class="btn" id="next-page" onclick="changePage(1)">Next</button>
         </div>
     </div>
