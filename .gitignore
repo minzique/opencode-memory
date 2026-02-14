@@ -1,0 +1,12 @@
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+.env
+*.db
+*.db-wal
+*.db-shm
+memory.jsonl
+.sessions.json
