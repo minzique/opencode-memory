@@ -246,21 +246,25 @@ class MemoryStore:
         return [(s[0], s[1]) for s in scored[:limit]]
 
     def _compute_combined_score(self, similarity: float, mem_dict: dict) -> float:
-        """Combine semantic similarity with recency and access frequency."""
         now = time.time()
 
-        age_days = (now - mem_dict["created_at"]) / 86400
-        recency = math.exp(-age_days / 30)
+        created_days = (now - mem_dict["created_at"]) / 86400
+        creation_recency = math.exp(-created_days / 30)
+
+        last_access = mem_dict.get("last_accessed_at") or mem_dict["created_at"]
+        access_days = (now - last_access) / 86400
+        access_recency = math.exp(-access_days / 14)
 
         access_count = mem_dict.get("retrieval_count", 0)
-        access_score = min(1.0, math.log(access_count + 1) / math.log(50))
+        access_freq = min(1.0, math.log(access_count + 1) / math.log(50))
 
         confidence = mem_dict.get("confidence", 1.0)
 
         return (
-            0.60 * similarity
-            + 0.15 * recency
-            + 0.10 * access_score
+            0.50 * similarity
+            + 0.10 * creation_recency
+            + 0.15 * access_recency
+            + 0.10 * access_freq
             + 0.15 * confidence
         )
 
@@ -517,18 +521,44 @@ class MemoryStore:
             "db_size_bytes": db_size,
         }
 
-    def decay_scores(self, factor: float, min_score: float) -> None:
+    def get_global_memories(
+        self,
+        allowed_types: list[str],
+        exclude_project_id: str | None = None,
+        limit: int = 10,
+    ) -> list[dict]:
+        placeholders = ",".join("?" for _ in allowed_types)
+        query = f"SELECT * FROM memories WHERE scope = 'global' AND type IN ({placeholders}) "
+        params: list = list(allowed_types)
+        if exclude_project_id:
+            query += "AND (project_id != ? OR project_id IS NULL) "
+            params.append(exclude_project_id)
+        query += "ORDER BY score DESC, retrieval_count DESC LIMIT ?"
+        params.append(limit)
+        rows = self.db.execute(query, params).fetchall()
+        results = []
+        for row in rows:
+            mem = dict(row)
+            mem["tags"] = json.loads(mem["tags"])
+            mem["metadata"] = json.loads(mem["metadata"])
+            results.append(mem)
+        return results
+
+    def decay_scores(self, factor: float, min_score: float) -> dict:
+        now = time.time()
         self.db.execute(
             "UPDATE memories SET score = score * ?, updated_at = ?",
-            (factor, time.time()),
+            (factor, now),
         )
         to_delete = self.db.execute(
             "SELECT id FROM memories WHERE score < ?", (min_score,)
         ).fetchall()
-        for row in to_delete:
-            self.delete_memory(row[0])
+        deleted_ids = [row[0] for row in to_delete]
+        for mid in deleted_ids:
+            self.delete_memory(mid)
         self.db.commit()
-        logger.info("Decayed scores by %.2f, deleted %d low-score memories", factor, len(to_delete))
+        logger.info("Decayed scores by %.2f, deleted %d low-score memories", factor, len(deleted_ids))
+        return {"decayed_at": now, "deleted_count": len(deleted_ids), "deleted_ids": deleted_ids}
 
     def close(self) -> None:
         self.db.close()

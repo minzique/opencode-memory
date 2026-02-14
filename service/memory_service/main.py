@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -13,11 +14,13 @@ from memory_service.extractor import extract_memories
 from memory_service.models import (
     BootstrapRequest,
     BootstrapResponse,
+    CrossProjectMemory,
     EpisodeRecord,
     EpisodeRequest,
     ExtractRequest,
     ExtractResponse,
     MemoryRecord,
+    PublishRequest,
     RecallQuery,
     RecallResponse,
     RecallResult,
@@ -31,16 +34,44 @@ from memory_service.dashboard import router as dashboard_router
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+_decay_task: asyncio.Task | None = None
+
+
+async def _decay_loop(store: MemoryStore) -> None:
+    interval = settings.decay_interval_hours * 3600
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            result = store.decay_scores(settings.decay_factor, settings.min_score)
+            logger.info("Scheduled decay: deleted %d memories", result["deleted_count"])
+        except Exception:
+            logger.exception("Scheduled decay failed")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _decay_task
     app.state.store = MemoryStore(settings.db_path)
     app.state.embeddings = EmbeddingClient(
         settings.openai_api_key, settings.embedding_model, settings.embedding_dimensions
     )
     app.state.start_time = time.time()
+    app.state.last_decay_at = None
+
+    if settings.decay_interval_hours > 0:
+        _decay_task = asyncio.create_task(_decay_loop(app.state.store))
+        logger.info("Decay scheduler started (every %.1fh)", settings.decay_interval_hours)
+
     logger.info("Memory service started on %s:%d", settings.host, settings.port)
     yield
+
+    if _decay_task:
+        _decay_task.cancel()
+        try:
+            await _decay_task
+        except asyncio.CancelledError:
+            pass
+
     app.state.store.close()
     logger.info("Memory service stopped")
 
@@ -48,7 +79,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="OpenCode Memory Service",
     description="Persistent semantic memory for AI agents",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
@@ -59,7 +90,7 @@ app.include_router(dashboard_router)
 async def root() -> dict[str, Any]:
     return {
         "service": "opencode-memory",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "endpoints": [
             {"method": "POST", "path": "/remember", "description": "Store a memory"},
             {"method": "POST", "path": "/extract", "description": "Extract memories from text via LLM"},
@@ -73,6 +104,8 @@ async def root() -> dict[str, Any]:
             {"method": "DELETE", "path": "/state/{project_id}", "description": "Clear working state"},
             {"method": "POST", "path": "/bootstrap", "description": "Get full session context"},
             {"method": "GET", "path": "/status", "description": "Service status"},
+            {"method": "POST", "path": "/decay", "description": "Trigger memory score decay"},
+            {"method": "POST", "path": "/publish", "description": "Publish a blog post"},
             {"method": "GET", "path": "/health", "description": "Health check"},
         ],
     }
@@ -368,6 +401,14 @@ async def delete_state(project_id: str) -> Response:
     return Response(status_code=204)
 
 
+@app.post("/decay")
+async def trigger_decay() -> dict[str, Any]:
+    store: MemoryStore = app.state.store
+    result = store.decay_scores(settings.decay_factor, settings.min_score)
+    app.state.last_decay_at = result["decayed_at"]
+    return result
+
+
 @app.post("/bootstrap")
 async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
     store: MemoryStore = app.state.store
@@ -422,6 +463,31 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
                     MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
                 )
 
+    if (
+        request.include_cross_project
+        and settings.cross_project_enabled
+        and project_id
+    ):
+        cross_slots = max(1, int(request.memory_limit * settings.cross_project_budget_pct))
+        global_mems = store.get_global_memories(
+            allowed_types=settings.cross_project_types,
+            exclude_project_id=project_id,
+            limit=cross_slots,
+        )
+        seen_ids_for_cross = {m.id for m in response.memories}
+        for mem in global_mems:
+            if mem["id"] in seen_ids_for_cross:
+                continue
+            record = MemoryRecord(
+                **{k: v for k, v in mem.items() if k in MemoryRecord.model_fields}
+            )
+            response.cross_project.append(
+                CrossProjectMemory(
+                    memory=record,
+                    origin_project=mem.get("project_id"),
+                )
+            )
+
     if request.include_episodes and project_id:
         episodes = store.list_episodes(project_id=project_id, limit=request.episode_limit)
         for ep in episodes:
@@ -445,13 +511,79 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
     return response
 
 
+@app.post("/publish", status_code=201)
+async def publish(request: PublishRequest) -> dict[str, Any]:
+    import re
+    import subprocess
+    from datetime import date
+    from pathlib import Path
+
+    repo = Path(settings.blog_repo_path)
+    content_dir = repo / settings.blog_content_dir
+    if not content_dir.is_dir():
+        raise HTTPException(status_code=500, detail=f"Blog content dir not found: {content_dir}")
+
+    slug = request.slug
+    if not slug:
+        slug = re.sub(r"[^a-z0-9]+", "-", request.title.lower()).strip("-")
+
+    filename = f"{slug}.md"
+    filepath = content_dir / filename
+
+    if filepath.exists():
+        raise HTTPException(status_code=409, detail=f"Post already exists: {filename}")
+
+    today = date.today().isoformat()
+    frontmatter = (
+        f"---\n"
+        f"title: '{request.title}'\n"
+        f"description: '{request.description}'\n"
+        f"pubDate: '{today}'\n"
+        f"author: '{request.author}'\n"
+        f"---\n\n"
+    )
+    filepath.write_text(frontmatter + request.body, encoding="utf-8")
+
+    try:
+        subprocess.run(
+            ["git", "add", str(filepath)],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", f"post: {request.title}"],
+            cwd=str(repo), check=True, capture_output=True,
+        )
+
+        pushed = False
+        if request.push:
+            subprocess.run(
+                ["git", "push", "origin", "main"],
+                cwd=str(repo), check=True, capture_output=True,
+            )
+            pushed = True
+
+        return {
+            "status": "published",
+            "slug": slug,
+            "file": str(filepath),
+            "pushed": pushed,
+            "url": f"https://minzique.github.io/log/blog/{slug}/",
+        }
+    except subprocess.CalledProcessError as exc:
+        logger.exception("Git operation failed during publish")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Git failed: {exc.stderr.decode() if exc.stderr else str(exc)}",
+        ) from exc
+
+
 @app.get("/status")
 async def status() -> ServiceStatus:
     store: MemoryStore = app.state.store
     stats = store.get_stats()
     return ServiceStatus(
         healthy=True,
-        version="0.3.0",
+        version="0.4.0",
         memory_count=stats["memory_count"],
         episode_count=stats["episode_count"],
         state_count=stats["state_count"],

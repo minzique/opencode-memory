@@ -22,6 +22,24 @@ class Settings(BaseSettings):
     min_score: float = 0.1
     max_memory_age_days: int = 90
 
+    # Background decay scheduler
+    decay_interval_hours: float = 24.0  # run decay every N hours (0 = disabled)
+
+    # Cross-project sharing guardrails
+    cross_project_enabled: bool = True
+    cross_project_types: list[str] = [
+        "preference", "convention", "pattern", "architecture", "fact",
+    ]
+    cross_project_blocked_types: list[str] = [
+        "constraint", "decision", "error-solution", "working_context",
+    ]
+    cross_project_threshold: float = 0.5  # higher bar than same-project (0.3)
+    cross_project_budget_pct: float = 0.2  # max 20% of memory slots
+
+    blog_repo_path: str = str(Path.home() / "Developer" / "log")
+    blog_content_dir: str = "src/content/blog"
+    blog_default_author: str = "Lume"
+
     model_config = {"env_prefix": "MEMORY_", "env_file": ".env"}
 
 

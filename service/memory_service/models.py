@@ -155,17 +155,24 @@ class BootstrapRequest(BaseModel):
     include_state: bool = Field(True, description="Include working state")
     include_memories: bool = Field(True, description="Include relevant memories")
     include_episodes: bool = Field(True, description="Include recent episodes")
+    include_cross_project: bool = Field(True, description="Include global memories from other projects")
     memory_limit: int = Field(15, description="Max memories to include")
     episode_limit: int = Field(3, description="Max recent episodes to include")
+
+
+class CrossProjectMemory(BaseModel):
+    memory: MemoryRecord
+    origin_project: str | None = None
 
 
 class BootstrapResponse(BaseModel):
     project_id: str | None = None
     state: WorkingState | None = None
     memories: list[MemoryRecord] = Field(default_factory=list)
+    cross_project: list[CrossProjectMemory] = Field(default_factory=list)
     recent_episodes: list[EpisodeRecord] = Field(default_factory=list)
-    constraints: list[MemoryRecord] = Field(default_factory=list, description="Active constraints")
-    failed_approaches: list[MemoryRecord] = Field(default_factory=list, description="Things that didn't work")
+    constraints: list[MemoryRecord] = Field(default_factory=list)
+    failed_approaches: list[MemoryRecord] = Field(default_factory=list)
 
 
 class ServiceStatus(BaseModel):
@@ -202,7 +209,14 @@ class ExtractedMemory(BaseModel):
 
 
 class ExtractResponse(BaseModel):
-    """Response from /extract endpoint."""
-
     extracted: int = Field(0, description="Number of memories extracted and stored")
     memory_ids: list[str] = Field(default_factory=list, description="IDs of created memories")
+
+
+class PublishRequest(BaseModel):
+    title: str = Field(..., description="Post title")
+    description: str = Field(..., description="One-line summary")
+    body: str = Field(..., description="Markdown body content (no frontmatter)")
+    author: str = Field("Lume", description="Post author")
+    slug: str | None = Field(None, description="URL slug (auto-generated from title if omitted)")
+    push: bool = Field(True, description="Git push after commit to trigger deploy")
