@@ -85,11 +85,27 @@ CREATE TABLE IF NOT EXISTS working_state (
     updated_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS todos (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    project_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    priority TEXT NOT NULL DEFAULT 'medium',
+    tags TEXT DEFAULT '[]',
+    parent_id TEXT,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    completed_at REAL,
+    metadata TEXT DEFAULT '{}'
+);
+
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
 CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope);
 CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_session ON episodes(session_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_project ON episodes(project_id);
+CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project_id);
+CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status);
 """
 
 _SCHEMA_POST_MIGRATE = """
@@ -724,3 +740,133 @@ class MemoryStore:
     @staticmethod
     def generate_episode_id() -> str:
         return f"ep_{uuid4().hex[:12]}"
+
+    @staticmethod
+    def generate_todo_id() -> str:
+        return f"todo_{uuid4().hex[:12]}"
+
+    # ------------------------------------------------------------------
+    # Persistent Todos
+    # ------------------------------------------------------------------
+
+    def _parse_todo_row(self, row: sqlite3.Row) -> dict:
+        """Convert a raw DB row into a dict with parsed JSON fields."""
+        todo = dict(row)
+        todo["tags"] = json.loads(todo.get("tags") or "[]")
+        todo["metadata"] = json.loads(todo.get("metadata") or "{}")
+        return todo
+
+    def add_todo(
+        self,
+        todo_id: str,
+        content: str,
+        project_id: str | None = None,
+        status: str = "pending",
+        priority: str = "medium",
+        tags: list[str] | None = None,
+        parent_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        now = time.time()
+        self.db.execute(
+            """
+            INSERT INTO todos (id, content, project_id, status, priority, tags,
+                              parent_id, created_at, updated_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                todo_id, content, project_id, status, priority,
+                json.dumps(tags or []), parent_id, now, now,
+                json.dumps(metadata or {}),
+            ),
+        )
+        self.db.commit()
+        logger.debug("Created todo %s", todo_id)
+        return todo_id
+
+    def get_todo(self, todo_id: str) -> dict | None:
+        row = self.db.execute("SELECT * FROM todos WHERE id = ?", (todo_id,)).fetchone()
+        if row is None:
+            return None
+        return self._parse_todo_row(row)
+
+    def list_todos(
+        self,
+        project_id: str | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        include_completed: bool = False,
+        limit: int = 50,
+    ) -> list[dict]:
+        query = "SELECT * FROM todos WHERE 1=1 "
+        params: list = []
+
+        if project_id:
+            query += "AND project_id = ? "
+            params.append(project_id)
+        if status:
+            query += "AND status = ? "
+            params.append(status)
+        if priority:
+            query += "AND priority = ? "
+            params.append(priority)
+        if not include_completed:
+            query += "AND status NOT IN ('completed', 'cancelled') "
+
+        # Priority ordering: high > medium > low, then by creation
+        query += (
+            "ORDER BY "
+            "CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 END, "
+            "created_at ASC "
+            "LIMIT ?"
+        )
+        params.append(limit)
+
+        rows = self.db.execute(query, params).fetchall()
+        return [self._parse_todo_row(row) for row in rows]
+
+    def update_todo(self, todo_id: str, updates: dict) -> dict | None:
+        """Update specific fields of a todo. Returns the updated todo or None."""
+        existing = self.get_todo(todo_id)
+        if existing is None:
+            return None
+
+        now = time.time()
+        set_parts: list[str] = ["updated_at = ?"]
+        params: list = [now]
+
+        if "content" in updates and updates["content"] is not None:
+            set_parts.append("content = ?")
+            params.append(updates["content"])
+        if "status" in updates and updates["status"] is not None:
+            set_parts.append("status = ?")
+            params.append(updates["status"])
+            # Auto-set completed_at
+            if updates["status"] in ("completed", "cancelled"):
+                set_parts.append("completed_at = ?")
+                params.append(now)
+            elif existing.get("completed_at"):
+                # Re-opening: clear completed_at
+                set_parts.append("completed_at = NULL")
+        if "priority" in updates and updates["priority"] is not None:
+            set_parts.append("priority = ?")
+            params.append(updates["priority"])
+        if "tags" in updates and updates["tags"] is not None:
+            set_parts.append("tags = ?")
+            params.append(json.dumps(updates["tags"]))
+        if "metadata" in updates and updates["metadata"] is not None:
+            set_parts.append("metadata = ?")
+            params.append(json.dumps(updates["metadata"]))
+
+        params.append(todo_id)
+        self.db.execute(
+            f"UPDATE todos SET {', '.join(set_parts)} WHERE id = ?",
+            params,
+        )
+        self.db.commit()
+        return self.get_todo(todo_id)
+
+    def delete_todo(self, todo_id: str) -> bool:
+        cursor = self.db.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+        self.db.commit()
+        return cursor.rowcount > 0

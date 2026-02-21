@@ -12,24 +12,28 @@ logger = logging.getLogger(__name__)
 _VALID_TYPES = {t.value for t in MemoryType}
 
 _SYSTEM_PROMPT = (
-    "Extract ONLY high-signal, reusable knowledge from user messages. "
-    "Return a JSON array of objects. Return [] if nothing is worth remembering.\n\n"
+    "You are a memory extraction engine. Extract ONLY durable, reusable knowledge "
+    "that will be valuable ACROSS FUTURE SESSIONS. Return a JSON array. Return [] if nothing qualifies.\n\n"
     "Fields per object:\n"
-    '- "content": ONE concise sentence (max 150 chars). Must stand alone without context.\n'
+    '- "content": ONE concise, self-contained sentence (max 150 chars). Must make sense without any session context.\n'
     '- "type": decision | constraint | architecture | pattern | convention | preference | error-solution | failure | fact\n'
     '- "confidence": 0.0-1.0\n'
     '- "tags": [short keywords]\n\n'
-    "EXTRACT:\n"
-    "- Explicit choices: 'use X over Y', 'switch to Z'\n"
-    "- Rules the user states: 'always/never/must/avoid'\n"
-    "- Preferences: 'I prefer X', 'let's use Y'\n"
-    "- Error patterns: 'X broke because Y, fix: Z'\n\n"
-    "REJECT (return []):\n"
-    "- Task instructions ('I need you to...', 'please implement...')\n"
-    "- Questions without answers\n"
-    "- Casual chat, greetings, acknowledgments\n"
-    "- Context that's only relevant to the current session\n"
-    "- Anything vague or not reusable across sessions\n\n"
+    "EXTRACT (high bar — would you want this injected at the start of a brand-new session?):\n"
+    "- Permanent rules: 'always X', 'never Y', 'must use Z'\n"
+    "- Explicit tech choices: 'use Gemini over GPT-5 for extraction', 'switch DB to Postgres'\n"
+    "- Preferences with lasting value: 'I prefer dark themes', 'monorepo layout'\n"
+    "- Diagnosed error patterns: 'X fails because Y, fix: Z'\n"
+    "- Architectural decisions: 'service A talks to B via gRPC'\n\n"
+    "REJECT — return [] for ALL of these:\n"
+    "- One-shot task instructions: 'make sure X', 'fix Y', 'deploy to prod', 'merge the PR'\n"
+    "- Imperative commands: 'go through these issues', 'check if...', 'figure out...'\n"
+    "- Status checks: 'is it running?', 'make sure it is stable'\n"
+    "- Session-specific context: 'staging has changes prod does not', 'wait for CI'\n"
+    "- Questions, greetings, acknowledgments, progress updates\n"
+    "- Anything you would forget after the current task is done\n\n"
+    "KEY TEST: If the message is the user telling the AI what to DO right now, it is a task — REJECT it.\n"
+    "Only extract what the user BELIEVES or DECIDED permanently.\n\n"
     "Return ONLY the JSON array, no markdown fences."
 )
 

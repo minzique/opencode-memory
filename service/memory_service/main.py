@@ -16,18 +16,22 @@ from memory_service.models import (
     BootstrapRequest,
     BootstrapResponse,
     CleanupRequest,
+    CreateTodoRequest,
     CrossProjectMemory,
     EpisodeRecord,
     EpisodeRequest,
     ExtractRequest,
     ExtractResponse,
     MemoryRecord,
+    PersistentTodo,
     PublishRequest,
     RecallQuery,
     RecallResponse,
     RecallResult,
     RememberRequest,
     ServiceStatus,
+    TodoListResponse,
+    UpdateTodoRequest,
     WorkingState,
 )
 from memory_service.store import MemoryStore, ancestor_chain
@@ -670,6 +674,83 @@ async def status() -> ServiceStatus:
         uptime_seconds=time.time() - app.state.start_time,
     )
 
+# ------------------------------------------------------------------
+# Persistent Todos
+# ------------------------------------------------------------------
+
+
+@app.post("/todos", status_code=201)
+async def create_todo(request: CreateTodoRequest) -> PersistentTodo:
+    store: MemoryStore = app.state.store
+    todo_id = MemoryStore.generate_todo_id()
+    store.add_todo(
+        todo_id=todo_id,
+        content=request.content,
+        project_id=request.project_id,
+        status=request.status.value,
+        priority=request.priority.value,
+        tags=request.tags,
+        parent_id=request.parent_id,
+        metadata=request.metadata,
+    )
+    todo = store.get_todo(todo_id)
+    return PersistentTodo(**{k: v for k, v in todo.items() if k in PersistentTodo.model_fields})
+
+
+@app.get("/todos")
+async def list_todos(
+    project_id: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+    include_completed: bool = False,
+    limit: int = 50,
+) -> TodoListResponse:
+    store: MemoryStore = app.state.store
+    todos = store.list_todos(
+        project_id=project_id,
+        status=status,
+        priority=priority,
+        include_completed=include_completed,
+        limit=limit,
+    )
+    items = [
+        PersistentTodo(**{k: v for k, v in t.items() if k in PersistentTodo.model_fields})
+        for t in todos
+    ]
+    return TodoListResponse(todos=items, total=len(items))
+
+
+@app.get("/todos/{todo_id}")
+async def get_todo_by_id(todo_id: str) -> PersistentTodo:
+    store: MemoryStore = app.state.store
+    todo = store.get_todo(todo_id)
+    if todo is None:
+        raise HTTPException(status_code=404, detail=f"Todo {todo_id} not found")
+    return PersistentTodo(**{k: v for k, v in todo.items() if k in PersistentTodo.model_fields})
+
+
+@app.patch("/todos/{todo_id}")
+async def update_todo(todo_id: str, request: UpdateTodoRequest) -> PersistentTodo:
+    store: MemoryStore = app.state.store
+    updates = request.model_dump(exclude_none=True)
+    # Convert enum values to strings for the store
+    if "status" in updates:
+        updates["status"] = updates["status"].value if hasattr(updates["status"], "value") else updates["status"]
+    if "priority" in updates:
+        updates["priority"] = updates["priority"].value if hasattr(updates["priority"], "value") else updates["priority"]
+    todo = store.update_todo(todo_id, updates)
+    if todo is None:
+        raise HTTPException(status_code=404, detail=f"Todo {todo_id} not found")
+    return PersistentTodo(**{k: v for k, v in todo.items() if k in PersistentTodo.model_fields})
+
+
+@app.delete("/todos/{todo_id}", status_code=204)
+async def delete_todo(todo_id: str) -> Response:
+    store: MemoryStore = app.state.store
+    deleted = store.delete_todo(todo_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Todo {todo_id} not found")
+    return Response(status_code=204)
 
 def run():
     import uvicorn

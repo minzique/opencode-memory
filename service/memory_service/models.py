@@ -231,3 +231,62 @@ class PublishRequest(BaseModel):
     author: str = Field("Lume", description="Post author")
     slug: str | None = Field(None, description="URL slug (auto-generated from title if omitted)")
     push: bool = Field(True, description="Git push after commit to trigger deploy")
+
+
+# ------------------------------------------------------------------
+# Persistent Todos — survive across sessions
+# ------------------------------------------------------------------
+
+
+class TodoStatus(str, Enum):
+    pending = "pending"
+    in_progress = "in_progress"
+    completed = "completed"
+    cancelled = "cancelled"
+
+
+class TodoPriority(str, Enum):
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
+class CreateTodoRequest(BaseModel):
+    """Create a persistent todo that survives across sessions."""
+    content: str = Field(..., description="What needs to be done")
+    project_id: str | None = Field(None, description="Project this belongs to")
+    priority: TodoPriority = Field(TodoPriority.medium, description="Priority level")
+    status: TodoStatus = Field(TodoStatus.pending, description="Initial status")
+    tags: list[str] = Field(default_factory=list, description="Tags for grouping")
+    parent_id: str | None = Field(None, description="Parent todo ID for subtasks")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary extra data")
+
+
+class UpdateTodoRequest(BaseModel):
+    """Update a persistent todo. Only provided fields are changed."""
+    content: str | None = Field(None, description="Updated description")
+    status: TodoStatus | None = Field(None, description="New status")
+    priority: TodoPriority | None = Field(None, description="New priority")
+    tags: list[str] | None = Field(None, description="Replace tags")
+    metadata: dict[str, Any] | None = Field(None, description="Replace metadata")
+
+
+class PersistentTodo(BaseModel):
+    """A persistent todo as returned by the API."""
+    id: str
+    content: str
+    project_id: str | None = None
+    status: TodoStatus = TodoStatus.pending
+    priority: TodoPriority = TodoPriority.medium
+    tags: list[str] = Field(default_factory=list)
+    parent_id: str | None = None
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+    completed_at: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TodoListResponse(BaseModel):
+    """Response from GET /todos."""
+    todos: list[PersistentTodo]
+    total: int
