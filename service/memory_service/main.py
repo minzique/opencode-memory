@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Response
+from openai import AsyncOpenAI
 
 from memory_service.config import settings
 from memory_service.embeddings import EmbeddingClient
@@ -56,6 +57,14 @@ async def lifespan(app: FastAPI):
     app.state.embeddings = EmbeddingClient(
         settings.openai_api_key, settings.embedding_model, settings.embedding_dimensions
     )
+
+    # Dedicated extraction client — supports Gemini or any OpenAI-compatible provider
+    ext_key = settings.extraction_api_key or settings.openai_api_key
+    ext_kwargs: dict[str, str] = {"api_key": ext_key}
+    if settings.extraction_base_url:
+        ext_kwargs["base_url"] = settings.extraction_base_url
+    app.state.extraction_client = AsyncOpenAI(**ext_kwargs)
+
     app.state.start_time = time.time()
     app.state.last_decay_at = None
 
@@ -173,9 +182,9 @@ async def extract(request: ExtractRequest) -> ExtractResponse:
     embeddings: EmbeddingClient = app.state.embeddings
 
     try:
-        client = embeddings._ensure_client()
+        extraction_client: AsyncOpenAI = app.state.extraction_client
         memories = await extract_memories(
-            client=client,
+            client=extraction_client,
             model=settings.extraction_model,
             text=request.text,
             context=request.context,

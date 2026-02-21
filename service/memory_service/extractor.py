@@ -52,7 +52,7 @@ async def extract_memories(
                 {"role": "user", "content": user_content},
             ],
             temperature=0.2,
-            max_tokens=2048,
+            max_completion_tokens=2048,
         )
 
         raw = response.choices[0].message.content or "[]"

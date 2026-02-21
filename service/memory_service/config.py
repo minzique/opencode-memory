@@ -14,7 +14,9 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
 
-    extraction_model: str = "gpt-4o-mini"
+    extraction_model: str = "gemini-2.5-flash-lite"
+    extraction_api_key: str = ""  # falls back to openai_api_key if empty
+    extraction_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
     consolidation_threshold: float = 0.85
 
     dedupe_threshold: float = 0.92

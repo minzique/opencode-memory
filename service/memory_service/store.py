@@ -14,23 +14,33 @@ import sqlite3
 import time
 from uuid import uuid4
 
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import sqlite_vec
 from sqlite_vec import serialize_float32
 
 logger = logging.getLogger(__name__)
 
-_STOP_PATHS = {"", "/", "/Users", "/home"}
+# Stop walking at these paths (never include them in the chain).
+# Home dir is added dynamically so sub-project chains don't inherit
+# every memory from every project the user has ever worked on.
+_STOP_PATHS = {"", "/", "/Users", "/home", str(Path.home())}
+
+# Maximum ancestor depth.  Even if we haven't hit a stop path, cap
+# the chain to avoid extremely deep (and noisy) lookups.
+_MAX_ANCESTOR_DEPTH = 4
 
 
-def ancestor_chain(project_id: str | None) -> list[str]:
-    """Return [exact, parent, grandparent, ...] stopping at home dir level."""
+def ancestor_chain(project_id: str | None, *, max_depth: int = _MAX_ANCESTOR_DEPTH) -> list[str]:
+    """Return [exact, parent, grandparent, ...] up to *max_depth* entries.
+
+    Stops early at home directory, /Users, /home, or filesystem root.
+    """
     if not project_id or not project_id.startswith("/"):
         return [project_id] if project_id else []
     parts: list[str] = []
     p = PurePosixPath(project_id)
-    while str(p) not in _STOP_PATHS:
+    while str(p) not in _STOP_PATHS and len(parts) < max_depth:
         parts.append(str(p))
         parent = str(p.parent)
         if parent == str(p):
