@@ -14,6 +14,7 @@ from memory_service.extractor import extract_memories
 from memory_service.models import (
     BootstrapRequest,
     BootstrapResponse,
+    CleanupRequest,
     CrossProjectMemory,
     EpisodeRecord,
     EpisodeRequest,
@@ -104,6 +105,7 @@ async def root() -> dict[str, Any]:
             {"method": "DELETE", "path": "/state/{project_id}", "description": "Clear working state"},
             {"method": "POST", "path": "/bootstrap", "description": "Get full session context"},
             {"method": "GET", "path": "/status", "description": "Service status"},
+            {"method": "POST", "path": "/cleanup", "description": "Purge memories by configurable rules"},
             {"method": "POST", "path": "/decay", "description": "Trigger memory score decay"},
             {"method": "POST", "path": "/publish", "description": "Publish a blog post"},
             {"method": "GET", "path": "/health", "description": "Health check"},
@@ -409,6 +411,19 @@ async def delete_state(project_id: str) -> Response:
     if not deleted:
         raise HTTPException(status_code=404, detail=f"No state for project {project_id}")
     return Response(status_code=204)
+
+
+@app.post("/cleanup")
+async def cleanup(request: CleanupRequest) -> dict[str, Any]:
+    store: MemoryStore = app.state.store
+    return store.cleanup_memories(
+        sources=request.sources,
+        tags=request.tags,
+        types=request.types,
+        max_confidence=request.max_confidence,
+        content_prefixes=request.content_prefixes,
+        dry_run=request.dry_run,
+    )
 
 
 @app.post("/decay")

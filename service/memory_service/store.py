@@ -544,6 +544,93 @@ class MemoryStore:
             results.append(mem)
         return results
 
+    def cleanup_memories(
+        self,
+        sources: list[str] | None = None,
+        tags: list[str] | None = None,
+        types: list[str] | None = None,
+        max_confidence: float | None = None,
+        content_prefixes: list[str] | None = None,
+        dry_run: bool = True,
+    ) -> dict:
+        """Delete memories matching configurable purge rules.
+
+        Args:
+            sources: Delete memories with source IN this list (e.g. ["tool:bash", "tool:read"])
+            tags: Delete memories containing ANY of these tags
+            types: Delete memories with type IN this list
+            max_confidence: Delete memories with confidence <= this value
+            content_prefixes: Delete memories whose content starts with any of these prefixes
+            dry_run: If True, only count — don't actually delete
+        """
+        # Build conditions — all are ANDed if multiple are provided,
+        # but each individual filter matches broadly (OR within filter)
+        conditions: list[str] = []
+        params: list = []
+
+        if sources:
+            placeholders = ",".join("?" for _ in sources)
+            conditions.append(f"source IN ({placeholders})")
+            params.extend(sources)
+
+        if tags:
+            # tags column is JSON array — check if any tag is present
+            tag_conditions = []
+            for tag in tags:
+                tag_conditions.append("tags LIKE ?")
+                params.append(f'%"{tag}"%')
+            conditions.append(f"({' OR '.join(tag_conditions)})")
+
+        if types:
+            placeholders = ",".join("?" for _ in types)
+            conditions.append(f"type IN ({placeholders})")
+            params.extend(types)
+
+        if max_confidence is not None:
+            conditions.append("confidence <= ?")
+            params.append(max_confidence)
+
+        if content_prefixes:
+            prefix_conditions = []
+            for prefix in content_prefixes:
+                prefix_conditions.append("content LIKE ?")
+                params.append(f"{prefix}%")
+            conditions.append(f"({' OR '.join(prefix_conditions)})")
+
+        if not conditions:
+            return {"deleted_count": 0, "matched_count": 0, "dry_run": dry_run, "error": "No filters specified"}
+
+        where_clause = " AND ".join(conditions)
+
+        # Count first
+        count = self.db.execute(
+            f"SELECT COUNT(*) FROM memories WHERE {where_clause}", params
+        ).fetchone()[0]
+
+        if dry_run:
+            # Return sample of what would be deleted
+            sample_rows = self.db.execute(
+                f"SELECT id, content, type, source, confidence FROM memories WHERE {where_clause} LIMIT 10",
+                params,
+            ).fetchall()
+            samples = [
+                {"id": row[0], "content": row[1][:100], "type": row[2], "source": row[3], "confidence": row[4]}
+                for row in sample_rows
+            ]
+            return {"matched_count": count, "deleted_count": 0, "dry_run": True, "samples": samples}
+
+        # Actually delete
+        to_delete = self.db.execute(
+            f"SELECT id FROM memories WHERE {where_clause}", params
+        ).fetchall()
+        deleted_ids = [row[0] for row in to_delete]
+
+        for mid in deleted_ids:
+            self.delete_memory(mid)
+
+        logger.info("Cleanup: deleted %d memories (filters: %s)", len(deleted_ids), where_clause)
+        return {"deleted_count": len(deleted_ids), "matched_count": count, "dry_run": False}
+
     def decay_scores(self, factor: float, min_score: float) -> dict:
         now = time.time()
         self.db.execute(

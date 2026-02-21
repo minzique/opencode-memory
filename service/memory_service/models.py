@@ -215,6 +215,15 @@ class ExtractResponse(BaseModel):
     memory_ids: list[str] = Field(default_factory=list, description="IDs of created memories")
 
 
+class CleanupRequest(BaseModel):
+    sources: list[str] | None = Field(None, description="Delete memories with source IN this list")
+    tags: list[str] | None = Field(None, description="Delete memories containing ANY of these tags")
+    types: list[str] | None = Field(None, description="Delete memories with type IN this list")
+    max_confidence: float | None = Field(None, description="Delete memories with confidence <= this value")
+    content_prefixes: list[str] | None = Field(None, description="Delete memories starting with these prefixes")
+    dry_run: bool = Field(True, description="Preview only — set False to actually delete")
+
+
 class PublishRequest(BaseModel):
     title: str = Field(..., description="Post title")
     description: str = Field(..., description="One-line summary")
