@@ -191,9 +191,25 @@ async def extract(request: ExtractRequest) -> ExtractResponse:
         _GLOBAL_TYPES = {"preference", "convention"}
 
         memory_ids: list[str] = []
+        skipped = 0
         for mem, embedding in zip(memories, vectors):
+            existing_id, similarity = store.check_near_duplicate(
+                embedding, settings.consolidation_threshold, settings.dedupe_threshold
+            )
+            if existing_id and similarity >= settings.dedupe_threshold:
+                skipped += 1
+                continue
+            if existing_id and similarity >= settings.consolidation_threshold:
+                store.consolidate_memory(
+                    existing_id=existing_id,
+                    new_content=mem.content,
+                    new_tags=mem.tags,
+                    new_confidence=mem.confidence,
+                )
+                memory_ids.append(existing_id)
+                continue
+
             memory_id = MemoryStore.generate_memory_id()
-            # Infer scope: explicit override > type-based inference > project default
             if request.scope:
                 mem_scope = request.scope
             elif mem.type.value in _GLOBAL_TYPES:
@@ -214,6 +230,8 @@ async def extract(request: ExtractRequest) -> ExtractResponse:
             )
             memory_ids.append(memory_id)
 
+        if skipped:
+            logger.info("Extract: %d new, %d deduped", len(memory_ids), skipped)
         return ExtractResponse(extracted=len(memory_ids), memory_ids=memory_ids)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
