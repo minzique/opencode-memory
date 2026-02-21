@@ -29,7 +29,7 @@ from memory_service.models import (
     ServiceStatus,
     WorkingState,
 )
-from memory_service.store import MemoryStore
+from memory_service.store import MemoryStore, ancestor_chain
 from memory_service.dashboard import router as dashboard_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -460,13 +460,22 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
     if not project_id and request.cwd:
         project_id = request.cwd.rstrip("/").rsplit("/", 1)[-1]
 
+    # Compute ancestor chain for hierarchical lookups.
+    # e.g. /Users/minzi/Developer/lume/memory-plugin
+    #   -> ["/Users/minzi/Developer/lume/memory-plugin",
+    #       "/Users/minzi/Developer/lume",
+    #       "/Users/minzi/Developer"]
+    chain = ancestor_chain(project_id) if project_id else []
+
     response = BootstrapResponse(project_id=project_id)
 
-    if request.include_state and project_id:
-        state_data = store.get_state(project_id)
+    # --- Working state: walk ancestor chain, return most-specific match ---
+    if request.include_state and chain:
+        state_data = store.get_state_hierarchical(chain)
         if state_data:
             response.state = WorkingState(**state_data["data"])
 
+    # --- Memories: query across ancestor chain ---
     if request.include_memories:
         limit = request.memory_limit
         identity_slots = max(3, limit // 5)
@@ -474,12 +483,14 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
 
         identity_mems = store.get_memories_by_type(
             ["architecture", "preference", "convention"],
-            project_id=project_id,
+            project_ids=chain or None,
+            project_id=project_id if not chain else None,
             limit=identity_slots,
         )
         constraint_mems_raw = store.get_memories_by_type(
             ["constraint"],
-            project_id=project_id,
+            project_ids=chain or None,
+            project_id=project_id if not chain else None,
             limit=constraint_slots,
         )
 
@@ -497,7 +508,16 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
                 MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
             )
 
-        if project_id:
+        # Error/failure memories — also hierarchical
+        if chain:
+            error_mems = store.get_memories_by_type(
+                ["error-solution", "failure"], project_ids=chain, limit=10
+            )
+            for mem in error_mems:
+                response.failed_approaches.append(
+                    MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
+                )
+        elif project_id:
             error_mems = store.get_memories_by_type(
                 ["error-solution", "failure"], project_id=project_id, limit=10
             )
@@ -506,6 +526,7 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
                     MemoryRecord(**{k: v for k, v in mem.items() if k in MemoryRecord.model_fields})
                 )
 
+    # --- Cross-project global memories ---
     if (
         request.include_cross_project
         and settings.cross_project_enabled
@@ -531,8 +552,13 @@ async def bootstrap(request: BootstrapRequest) -> BootstrapResponse:
                 )
             )
 
-    if request.include_episodes and project_id:
-        episodes = store.list_episodes(project_id=project_id, limit=request.episode_limit)
+    # --- Episodes: also hierarchical ---
+    if request.include_episodes and (chain or project_id):
+        episodes = store.list_episodes(
+            project_ids=chain or None,
+            project_id=project_id if not chain else None,
+            limit=request.episode_limit,
+        )
         for ep in episodes:
             ep_data = ep.get("data", {})
             response.recent_episodes.append(

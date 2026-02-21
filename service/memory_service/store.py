@@ -14,10 +14,29 @@ import sqlite3
 import time
 from uuid import uuid4
 
+from pathlib import PurePosixPath
+
 import sqlite_vec
 from sqlite_vec import serialize_float32
 
 logger = logging.getLogger(__name__)
+
+_STOP_PATHS = {"", "/", "/Users", "/home"}
+
+
+def ancestor_chain(project_id: str | None) -> list[str]:
+    """Return [exact, parent, grandparent, ...] stopping at home dir level."""
+    if not project_id or not project_id.startswith("/"):
+        return [project_id] if project_id else []
+    parts: list[str] = []
+    p = PurePosixPath(project_id)
+    while str(p) not in _STOP_PATHS:
+        parts.append(str(p))
+        parent = str(p.parent)
+        if parent == str(p):
+            break
+        p = PurePosixPath(parent)
+    return parts
 
 _SCHEMA_TABLES = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -356,7 +375,7 @@ class MemoryStore:
         new_content: str,
         new_tags: list[str],
         new_confidence: float,
-        new_metadata: dict,
+        new_metadata: dict | None = None,
     ) -> None:
         """Merge new memory data into an existing near-duplicate."""
         mem = self.get_memory(existing_id)
@@ -370,7 +389,8 @@ class MemoryStore:
         merged_tags = list(dict.fromkeys(existing_tags + new_tags))
 
         existing_meta: dict = mem.get("metadata", {})
-        existing_meta.update(new_metadata)
+        if new_metadata:
+            existing_meta.update(new_metadata)
 
         now = time.time()
         self.db.execute(
@@ -389,14 +409,29 @@ class MemoryStore:
         logger.debug("Consolidated memory %s", existing_id)
 
     def get_memories_by_type(
-        self, types: list[str], project_id: str | None = None, limit: int = 50
+        self,
+        types: list[str],
+        project_id: str | None = None,
+        project_ids: list[str] | None = None,
+        limit: int = 50,
     ) -> list[dict]:
-        placeholders = ",".join("?" for _ in types)
-        query = f"SELECT * FROM memories WHERE type IN ({placeholders}) "
+        """Fetch memories by type.
+
+        If *project_ids* is given (e.g. from ancestor_chain), match any of
+        those project paths.  Otherwise fall back to exact project_id match.
+        """
+        type_ph = ",".join("?" for _ in types)
+        query = f"SELECT * FROM memories WHERE type IN ({type_ph}) "
         params: list = list(types)
-        if project_id:
+
+        if project_ids:
+            pid_ph = ",".join("?" for _ in project_ids)
+            query += f"AND (project_id IN ({pid_ph}) OR project_id IS NULL) "
+            params.extend(project_ids)
+        elif project_id:
             query += "AND (project_id = ? OR project_id IS NULL) "
             params.append(project_id)
+
         query += "ORDER BY score DESC, retrieval_count DESC LIMIT ?"
         params.append(limit)
         rows = self.db.execute(query, params).fetchall()
@@ -439,6 +474,14 @@ class MemoryStore:
         if row is None:
             return None
         return {"data": json.loads(row[0]), "updated_at": row[1]}
+
+    def get_state_hierarchical(self, project_ids: list[str]) -> dict | None:
+        """Walk ancestor chain and return the first (most specific) working state found."""
+        for pid in project_ids:
+            state = self.get_state(pid)
+            if state is not None:
+                return state
+        return None
 
     def list_states(self) -> list[dict]:
         rows = self.db.execute(
@@ -486,8 +529,21 @@ class MemoryStore:
         logger.debug("Stored episode %s for session %s", episode_id, session_id)
         return episode_id
 
-    def list_episodes(self, project_id: str | None = None, limit: int = 20) -> list[dict]:
-        if project_id:
+    def list_episodes(
+        self,
+        project_id: str | None = None,
+        project_ids: list[str] | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """List episodes. If project_ids given, match any in the chain."""
+        if project_ids:
+            pid_ph = ",".join("?" for _ in project_ids)
+            rows = self.db.execute(
+                f"SELECT * FROM episodes WHERE project_id IN ({pid_ph}) "
+                "ORDER BY created_at DESC LIMIT ?",
+                [*project_ids, limit],
+            ).fetchall()
+        elif project_id:
             rows = self.db.execute(
                 "SELECT * FROM episodes WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
                 (project_id, limit),
